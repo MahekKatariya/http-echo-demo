@@ -1,0 +1,20 @@
+services:
+  http-echo-server:
+    container_name: http-echo-demo
+    restart: unless-stopped
+    image: IMAGE
+    networks:
+      - traefik
+    environment:
+      - NODE_ENV=${NODE_ENV}
+    # Traefik stuff
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.users.rule=Host(`__DOMAIN__`) && PathPrefix(`/api`)" # domain to expose on"traefik.http.routers.myapp.rule=Host(`example.com`) && PathPrefix(`/api`)"
+      - "traefik.http.services.users.loadbalancer.server.port=3000"
+      - "traefik.http.routers.users.tls.certresolver=myresolver"
+      - "traefik.http.routers.users.entrypoints=websecure"
+    
+networks:
+  traefik:
+    external: true

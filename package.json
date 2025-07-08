@@ -1,0 +1,24 @@
+{
+  "name": "http-echo-demo",
+  "version": "1.0.0",
+  "description": "A simple Node.js HTTP server that echoes back the requested path and HTTP method",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "curl http://localhost:3000/test"
+  },
+  "keywords": [
+    "nodejs",
+    "http",
+    "server",
+    "echo",
+    "path",
+    "method"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=12.0.0"
+  }
+}

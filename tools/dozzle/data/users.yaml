@@ -1,0 +1,6 @@
+users:
+    admin:
+        email: ""
+        name: admin
+        password: "<password>"
+        filter: ""

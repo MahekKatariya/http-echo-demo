@@ -1,0 +1,30 @@
+services:
+  vault:
+    image: hashicorp/vault:latest
+    container_name: vault
+    environment:
+      - VAULT_ADDR=http://localhost:8200
+      - VAULT_STORAGE_FILE_PATH=/vault/file
+      - VAULT_UI=true
+    volumes:
+      - vault_data:/vault/file
+      - ./config/vault.hcl:/vault/config/vault.hcl   # Custom Vault config
+    cap_add:
+      - IPC_LOCK
+    restart: always
+    entrypoint: vault server -config /vault/config/vault.hcl
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.vault.rule=Host(`__DOMAIN__`)"
+      - "traefik.http.services.vault.loadbalancer.server.port=8200"
+      - "traefik.http.routers.vault.tls.certresolver=myresolver"
+      - "traefik.http.routers.vault.entrypoints=websecure"
+    networks:
+      - traefik
+
+volumes:
+  vault_data:
+
+networks:
+  traefik:
+    external: true

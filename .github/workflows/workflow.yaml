@@ -1,0 +1,117 @@
+name: Create and publish a Docker image
+
+on:
+  push:
+    branches: ['development', 'main']
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  DIRECTORY_PATH: app/http-echo
+
+jobs:
+  build-and-push-image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Import Secrets
+        id: import-secrets
+        uses: hashicorp/vault-action@v2
+        env:
+          SECRET_PATH: ${{ github.ref_name == 'main' && 'main/data/env' || 'dev/data/env' }}
+        with:
+          url: ${{ secrets.VAULT_URL }}
+          exportToken: true
+          method: jwt
+          role: read-secret
+          secrets: |
+            ${{ env.SECRET_PATH }} * ;
+
+      - name: Step following 'Import Secrets'
+        run: |
+          echo '${{ toJson(steps.import-secrets.outputs) }}' | jq -r 'to_entries[] | "\(.key)=\(.value)"' >> .env
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ github.ref_name }}-${{ github.sha }}
+            type=ref,event=branch
+
+      - name: Build and push Docker image
+        id: push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  deploy:
+    needs: build-and-push-image
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set server details
+        run: |
+          if [[ "${{ github.ref_name }}" == "main" ]]; then
+            echo "Using MAIN server"
+          else
+            echo "Using DEV server"
+          fi
+
+      - name: Copy file via SSH
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ github.ref_name == 'main' && secrets.MAIN_SERVER_IP || secrets.DEV_SERVER_IP }}
+          username: ${{ github.ref_name == 'main' && secrets.MAIN_SERVER_USER || secrets.DEV_SERVER_USER }}
+          key: ${{ github.ref_name == 'main' && secrets.MAIN_SERVER_SSH_KEY || secrets.DEV_SERVER_SSH_KEY }}
+          port: 22
+          source: "docker-compose.yaml"
+          target: ${{ env.DIRECTORY_PATH }}
+          overwrite: true
+
+      - name: SSH to server and update docker-compose
+        uses: appleboy/ssh-action@v1.2.2
+        env:
+          DOMAIN: ${{ github.ref_name == 'main' && secrets.MAIN_DOMAIN || secrets.DEV_DOMAIN }}
+          NODE_ENV: ${{ github.ref_name == 'main' && 'production' || 'development' }}
+        with:
+          host: ${{ github.ref_name == 'main' && secrets.MAIN_SERVER_IP || secrets.DEV_SERVER_IP }}
+          username: ${{ github.ref_name == 'main' && secrets.MAIN_SERVER_USER || secrets.DEV_SERVER_USER }}
+          key: ${{ github.ref_name == 'main' && secrets.MAIN_SERVER_SSH_KEY || secrets.DEV_SERVER_SSH_KEY }}
+          port: 22
+          envs: NODE_ENV
+          script: |
+            REPO_NAME="${{ github.repository }}"
+            IMAGE_TAG="${{ env.REGISTRY }}/${REPO_NAME,,}:${{ github.ref_name }}-${{ github.sha }}"
+            
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+            # Update docker-compose with the new image tag
+            sed -i "s|image: .*|image: ${IMAGE_TAG}|" ${{ env.DIRECTORY_PATH }}/docker-compose.yaml
+            sed -i "s|__DOMAIN__|${{ env.DOMAIN }}|g" ${{ env.DIRECTORY_PATH }}/docker-compose.yaml
+
+            # Navigate and restart containers
+            cd ${{ env.DIRECTORY_PATH }}
+            docker compose pull
+            docker compose up -d --force-recreate
